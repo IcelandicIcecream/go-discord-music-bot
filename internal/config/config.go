@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"github.com/spf13/viper"
@@ -21,6 +21,8 @@ func LoadConfig() (config Config, err error) {
 			panic("Error reading config file")
 		}
 	}
+
+	config.Token = viper.GetString("DISCORD_TOKEN")
 
 	err = viper.Unmarshal(&config)
 	return config, err
