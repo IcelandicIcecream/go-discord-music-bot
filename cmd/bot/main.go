@@ -8,6 +8,7 @@ import (
 
 	"github.com/IcelandicIcecream/go-discord-music-bot/internal/bot"
 	"github.com/IcelandicIcecream/go-discord-music-bot/internal/config"
+	"github.com/IcelandicIcecream/go-discord-music-bot/internal/services"
 )
 
 func main() {
@@ -19,8 +20,15 @@ func main() {
 		return
 	}
 
+	// Initialize Youtube Service
+	youtubeService, err := services.NewYouTubeService(config.YoutubeToken)
+	if err != nil {
+		fmt.Println("error creating Youtube service, ", err)
+		return
+	}
+
 	// Create a new Discord session using the provided bot token.
-	bot, err := bot.NewBot(config.Token)
+	bot, err := bot.NewBot(config.DiscordToken, youtubeService)
 	if err != nil {
 		fmt.Println("error creating bot,", err)
 		return

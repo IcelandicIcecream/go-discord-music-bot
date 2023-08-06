@@ -5,7 +5,8 @@ import (
 )
 
 type Config struct {
-	Token string
+	DiscordToken string
+	YoutubeToken string
 }
 
 func LoadConfig() (config Config, err error) {
@@ -22,7 +23,8 @@ func LoadConfig() (config Config, err error) {
 		}
 	}
 
-	config.Token = viper.GetString("DISCORD_TOKEN")
+	config.DiscordToken = viper.GetString("DISCORD_TOKEN")
+	config.YoutubeToken = viper.GetString("YOUTUBE_TOKEN")
 
 	err = viper.Unmarshal(&config)
 	return config, err
