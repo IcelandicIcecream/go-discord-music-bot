@@ -12,7 +12,6 @@ import (
 )
 
 func main() {
-
 	// Load config from viper
 	config, err := config.LoadConfig()
 	if err != nil {
@@ -40,6 +39,19 @@ func main() {
 	// Register messageCreate as a callback for the messageCreate events.
 	bot.Session.AddHandler(bot.MessageCreateHandler)
 
+	// Register voiceStateUpdate as a callback for the voiceStateUpdate events.
+	bot.Session.AddHandler(bot.VoiceStateUpdateHandler)
+
+	// Ensure we close the session if the program exits.
+	defer func() {
+		// Capture panic if any
+		if r := recover(); r != nil {
+			fmt.Println("Bot panicked: ", r)
+		}
+		// Close the session
+		bot.Session.Close()
+	}()
+
 	// Open a websocket connection to Discord and begin listening.
 	err = bot.Session.Open()
 	if err != nil {
@@ -47,13 +59,10 @@ func main() {
 		return
 	}
 
-	fmt.Println("Bot is now running.  Press CTRL-C to exit.")
+	fmt.Println("Bot is now running. Press CTRL-C to exit.")
 
 	// Wait here until CTRL-C or other term signal is received.
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
-
-	// Cleanly close down the Discord session.
-	bot.Session.Close()
 }

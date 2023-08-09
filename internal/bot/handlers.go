@@ -1,19 +1,25 @@
 package bot
 
 import (
+	"bytes"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 
+	"github.com/bwmarrin/dgvoice"
 	"github.com/bwmarrin/discordgo"
+	"github.com/google/uuid"
 )
 
 func (b *Bot) ReadyHandler(s *discordgo.Session, event *discordgo.Ready) {
 	// Called when the bot is ready.
 	fmt.Println("Bot is ready!")
+
+	b.userVoiceChannelMap = make(map[string]string)
 }
 
 func (b *Bot) MessageCreateHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
-
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
@@ -24,24 +30,54 @@ func (b *Bot) MessageCreateHandler(s *discordgo.Session, m *discordgo.MessageCre
 	args := content[1:]
 
 	switch command {
-	case "!search":
-		// If command is "!search", we'll use YouTube Service to search for videos.
+
+	case "!play":
 		if len(args) > 0 {
+			voiceChannelID, ok := b.userVoiceChannelMap[m.Author.ID]
+			if !ok {
+				s.ChannelMessageSend(m.ChannelID, "You need to join a voice channel first.")
+				return
+			}
+
+			// Get youtube ID from search query
 			query := strings.Join(args, " ")
-			response, err := b.YoutubeService.SearchVideos(query, 3)
+			response, err := b.YoutubeService.SearchVideos(query, 1)
 			if err != nil {
 				s.ChannelMessageSend(m.ChannelID, "Error searching videos.")
 				return
 			}
 
-			// Collect video titles
-			titles := []string{}
-			for _, item := range response.Items {
-				titles = append(titles, item.Snippet.Title)
+			// If no videos found, return no videos found message
+			if len(response.Items) == 0 {
+				s.ChannelMessageSend(m.ChannelID, "No videos found.")
+				return
 			}
 
-			// Send the titles as a message
-			s.ChannelMessageSend(m.ChannelID, strings.Join(titles, "\n"))
+			videoID := response.Items[0].Id.VideoId
+			videoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+
+			// Join the voice channel defeaned but not muted
+			voiceConnection, err := s.ChannelVoiceJoin(m.GuildID, voiceChannelID, false, true)
+			if err != nil {
+				fmt.Printf("Error joining the voice channel: %v", err)
+				return
+			}
+			// If a song is currently playing or if the queue is not empty, add the song to the queue.
+			if b.GetIsPlaying() || !b.IsQueueEmpty(m.GuildID) {
+
+				// Add the song to the queue and update via message
+				s.ChannelMessageSend(m.ChannelID, "Song added to queue! 🎶 - "+videoURL)
+				b.AddToQueue(m.GuildID, videoURL)
+
+			} else {
+
+				// Add the song to the queue and immediately play it.
+				s.ChannelMessageSend(m.ChannelID, "Now playing! 🎶 - "+videoURL)
+				b.AddToQueue(m.GuildID, videoURL)
+				go b.PlayFromQueue(voiceConnection, m.GuildID)
+
+			}
+
 		} else {
 			s.ChannelMessageSend(m.ChannelID, "Please provide a search query.")
 		}
@@ -50,4 +86,149 @@ func (b *Bot) MessageCreateHandler(s *discordgo.Session, m *discordgo.MessageCre
 			s.ChannelMessageSend(m.ChannelID, "Pong!")
 		}
 	}
+}
+
+func (b *Bot) VoiceStateUpdateHandler(s *discordgo.Session, vsu *discordgo.VoiceStateUpdate) {
+	b.userVoiceChannelMap[vsu.UserID] = vsu.ChannelID
+}
+
+func (b *Bot) PlayAudioFile(
+	vc *discordgo.VoiceConnection,
+	videoURL string,
+	doneChan chan bool,
+) error {
+	audioFilePath, err := b.DownloadAudio(videoURL)
+	if err != nil {
+		return fmt.Errorf("error downloading audio file: %v", err)
+	}
+
+	// Cleanup after playing.
+	defer func() {
+		err = os.Remove(audioFilePath)
+		if err != nil {
+			fmt.Printf("Failed to remove audio file: %v\n", err)
+		}
+	}()
+
+	return b.PlayAudioInVC(vc, audioFilePath, doneChan)
+}
+
+// downloadAudio downloads an audio from a given URL and returns its path.
+func (b *Bot) DownloadAudio(videoURL string) (string, error) {
+	fmt.Println("downloading audio file...")
+
+	if _, err := os.Stat("tmp/"); os.IsNotExist(err) {
+		if err := os.Mkdir("tmp/", 0755); err != nil {
+			return "", fmt.Errorf("error creating tmp directory: %v", err)
+		}
+	}
+
+	// Generate a UUID for the temp filename
+	fileUUID := uuid.New().String()
+	audioFilePath := fmt.Sprintf("tmp/%s.mp3", fileUUID)
+
+	cmd := exec.Command("youtube-dl", "-x", "--audio-format", "mp3", "-o", audioFilePath, videoURL)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		fmt.Println("youtube-dl error:", stderr.String())
+		return "", err
+	}
+
+	fmt.Println("Download Complete: ", audioFilePath)
+
+	return audioFilePath, nil
+}
+
+func (b *Bot) PlayAudioInVC(
+	vc *discordgo.VoiceConnection,
+	audioFilePath string,
+	doneChan chan bool,
+) error {
+	fmt.Println("Playing audio file...")
+
+	// This function plays the audio and waits until it finishes.
+	dgvoice.PlayAudioFile(vc, audioFilePath, make(chan bool))
+
+	fmt.Println("Finished playing audio file.")
+	doneChan <- true
+
+	return nil
+}
+
+func (b *Bot) AddToQueue(guildID string, videoURL string) {
+	b.queueLock.Lock()
+	defer b.queueLock.Unlock()
+
+	b.queue[guildID] = append(b.queue[guildID], videoURL)
+}
+
+// GetNextInQueue gets the next song from the queue
+func (b *Bot) GetNextInQueue(guildID string) (string, bool) {
+	b.queueLock.Lock()
+	defer b.queueLock.Unlock()
+
+	if len(b.queue[guildID]) == 0 {
+		return "", false
+	}
+
+	nextURL := b.queue[guildID][0]
+	b.queue[guildID] = b.queue[guildID][1:]
+
+	return nextURL, true
+}
+
+func (b *Bot) IsQueueEmpty(guildID string) bool {
+	b.queueLock.Lock()
+	defer b.queueLock.Unlock()
+
+	return len(b.queue[guildID]) == 0
+}
+
+func (b *Bot) PlayFromQueue(vc *discordgo.VoiceConnection, guildID string) {
+	for {
+		if b.IsQueueEmpty(guildID) {
+			b.SetIsPlaying(false)
+			break
+		}
+
+		// Define a channel to wait for song completion.
+		doneChan := make(chan bool)
+		b.SetIsPlaying(true)
+		nextSong, _ := b.GetNextInQueue(guildID)
+		go func() {
+			defer func() {
+				close(doneChan) // Close doneChan when the goroutine finishes.
+				b.SetIsPlaying(false)
+			}()
+
+			err := b.PlayAudioFile(vc, nextSong, doneChan)
+			if err != nil {
+				fmt.Printf("Error playing audio: %v", err)
+				vc.Disconnect()
+				return
+			}
+
+			<-doneChan // Wait for the song to finish.
+		}()
+
+		// Wait for the current song to finish before starting the next one.
+		<-doneChan
+	}
+
+	// Disconnect from the voice channel
+	vc.Disconnect()
+}
+
+func (b *Bot) SetIsPlaying(val bool) {
+	b.isPlayingLock.Lock()
+	defer b.isPlayingLock.Unlock()
+	b.isPlaying = val
+}
+
+func (b *Bot) GetIsPlaying() bool {
+	b.isPlayingLock.Lock()
+	defer b.isPlayingLock.Unlock()
+	return b.isPlaying
 }
