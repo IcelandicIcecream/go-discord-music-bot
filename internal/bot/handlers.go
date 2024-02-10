@@ -35,51 +35,78 @@ func (b *Bot) MessageCreateHandler(s *discordgo.Session, m *discordgo.MessageCre
 
 	case "!play":
 		if len(args) > 0 {
-			b.userVoiceChannelMapLock.Lock()
-			voiceChannelID, ok := b.userVoiceChannelMap[m.Author.ID]
-			b.userVoiceChannelMapLock.Unlock()
-			if !ok {
-				s.ChannelMessageSend(m.ChannelID, "You need to join a voice channel first.")
-				return
-			}
 
-			// Get youtube ID from search query
-			query := strings.Join(args, " ")
-			response, err := b.YoutubeService.SearchVideos(query, 1)
+			// Find the channel that the message came from.
+			c, err := s.State.Channel(m.ChannelID)
 			if err != nil {
-				s.ChannelMessageSend(m.ChannelID, "Error searching videos.")
+				// Could not find channel.
 				return
 			}
 
-			// If no videos found, return no videos found message
-			if len(response.Items) == 0 {
-				s.ChannelMessageSend(m.ChannelID, "No videos found.")
-				return
-			}
-
-			videoID := response.Items[0].Id.VideoId
-			videoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
-
-			// Join the voice channel defeaned but not muted
-			voiceConnection, err := s.ChannelVoiceJoin(m.GuildID, voiceChannelID, false, true)
+			// Find the guild for that channel.
+			g, err := s.State.Guild(c.GuildID)
 			if err != nil {
-				fmt.Printf("Error joining the voice channel: %v", err)
+				// Could not find guild.
 				return
 			}
-			// If a song is currently playing or if the queue is not empty, add the song to the queue.
-			if b.GetIsPlaying() || !b.IsQueueEmpty(m.GuildID) {
 
-				// Add the song to the queue and update via message
-				s.ChannelMessageSend(m.ChannelID, "Song added to queue! 🎶 - "+videoURL)
-				b.AddToQueue(m.GuildID, videoURL)
+			// Look for the message sender in that guild's current voice states.
+			for _, vs := range g.VoiceStates {
+				if vs.UserID == m.Author.ID {
+					b.userVoiceChannelMapLock.Lock()
+					b.userVoiceChannelMap[m.Author.ID] = vs.ChannelID
+					voiceChannelID := b.userVoiceChannelMap[m.Author.ID]
+					b.userVoiceChannelMapLock.Unlock()
 
+					// Get youtube ID from search query
+					query := strings.Join(args, " ")
+					response, err := b.YoutubeService.SearchVideos(query, 1)
+					if err != nil {
+						s.ChannelMessageSend(m.ChannelID, "Error searching videos.")
+						fmt.Println("Error searching videos: ", err)
+						return
+					}
+
+					// If no videos found, return no videos found message
+					if len(response.Items) == 0 {
+						s.ChannelMessageSend(m.ChannelID, "No videos found.")
+						return
+					}
+
+					videoID := response.Items[0].Id.VideoId
+					videoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+
+					// Join the voice channel defeaned but not muted
+					voiceConnection, err := s.ChannelVoiceJoin(
+						m.GuildID,
+						voiceChannelID,
+						false,
+						true,
+					)
+					if err != nil {
+						fmt.Printf("Error joining the voice channel: %v", err)
+						return
+					}
+					// If a song is currently playing or if the queue is not empty, add the song to the queue.
+					if b.GetIsPlaying() || !b.IsQueueEmpty(m.GuildID) {
+						// Add the song to the queue and update via message
+						s.ChannelMessageSend(
+							m.ChannelID,
+							"MATTHEW IAN JOHN!! Song added to queue! 🎶 - "+videoURL,
+						)
+						b.AddToQueue(m.GuildID, videoURL)
+					} else {
+						// Add the song to the queue and immediately play it.
+						s.ChannelMessageSend(m.ChannelID, "BOWAN SMELLS!! Now playing! 🎶 - "+videoURL)
+						b.AddToQueue(m.GuildID, videoURL)
+						go b.PlayFromQueue(voiceConnection, m.GuildID)
+					}
+				}
+			}
+
+			if _, exists := b.userVoiceChannelMap[m.Author.ID]; !exists {
+				s.ChannelMessageSend(m.ChannelID, "You are not in a voice channel.")
 			} else {
-
-				// Add the song to the queue and immediately play it.
-				s.ChannelMessageSend(m.ChannelID, "Now playing! 🎶 - "+videoURL)
-				b.AddToQueue(m.GuildID, videoURL)
-				go b.PlayFromQueue(voiceConnection, m.GuildID)
-
 			}
 
 		} else {
@@ -116,27 +143,6 @@ func (b *Bot) VoiceStateUpdateHandler(s *discordgo.Session, vsu *discordgo.Voice
 	defer b.userVoiceChannelMapLock.Unlock()
 	b.userVoiceChannelMap[vsu.UserID] = vsu.ChannelID
 }
-
-// func (b *Bot) PlayAudioFile(
-// 	vc *discordgo.VoiceConnection,
-// 	videoURL string,
-// 	doneChan chan bool,
-// 	interruptChan chan bool,
-// ) error {
-// 	audioFilePath, err := b.DownloadAudio(videoURL)
-// 	if err != nil {
-// 		return fmt.Errorf("error downloading audio file: %v", err)
-// 	}
-//
-// 	// Cleanup after playing.
-// 	defer func() {
-// 		err = os.Remove(audioFilePath)
-// 		if err != nil {
-// 			fmt.Printf("Failed to remove audio file: %v\n", err)
-// 		}
-// 	}()
-//
-// 	return b.PlayAudioInVC(vc, audioFilePath, doneChan)
 
 // downloadAudio downloads an audio from a given URL and returns its path.
 func (b *Bot) DownloadAudio(videoURL string) (string, error) {
