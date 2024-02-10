@@ -92,12 +92,12 @@ func (b *Bot) MessageCreateHandler(s *discordgo.Session, m *discordgo.MessageCre
 						// Add the song to the queue and update via message
 						s.ChannelMessageSend(
 							m.ChannelID,
-							"MATTHEW IAN JOHN!! Song added to queue! 🎶 - "+videoURL,
+							"Song added to queue! 🎶 - "+videoURL,
 						)
 						b.AddToQueue(m.GuildID, videoURL)
 					} else {
 						// Add the song to the queue and immediately play it.
-						s.ChannelMessageSend(m.ChannelID, "BOWAN SMELLS!! Now playing! 🎶 - "+videoURL)
+						s.ChannelMessageSend(m.ChannelID, "Now playing! 🎶 - "+videoURL)
 						b.AddToQueue(m.GuildID, videoURL)
 						go b.PlayFromQueue(voiceConnection, m.GuildID)
 					}
