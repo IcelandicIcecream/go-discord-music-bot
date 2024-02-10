@@ -1,4 +1,6 @@
-Made a super simple bot to play youtube videos in Discord. A lot of bugs to fix, it's still a WIP. Here's a rundown on how to use it:
+## go-discord-music-bot
+
+Made a super simple bot in Go to play youtube videos in Discord. A lot of bugs to fix, it's still a WIP. Here's a rundown on how to use it:
 
 Assumming you have your discord and youtube api tokens set up and ready to go, add them to a .env file in the same directory. Refer to .env.example for the variable names.
 
