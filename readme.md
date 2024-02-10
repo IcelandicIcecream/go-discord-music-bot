@@ -5,6 +5,8 @@ Assumming you have your discord and youtube api tokens set up and ready to go, a
 To run the bot, type ```go run ./cmd/bot/main.go```
 
 Commands:
+```
 "!play <youtube link>" - Downloads the mp3 from a youtube link and stores it in the tmp/ folder, then adds it to queue or plays it.
 "!skip" - Skips the current song in queue
 "!stop" - Stops the whole queue
+```
